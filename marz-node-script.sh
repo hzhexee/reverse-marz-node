@@ -94,7 +94,7 @@ while true; do
 done
 
 while true; do
-    read -p "Введите имя ноды (например, us-node): " NODE_NAME
+    read -p "Введите имя ноды (например, us-node-1): " NODE_NAME
     if [ -z "$NODE_NAME" ]; then
         warning "Имя ноды не может быть пустым. Пожалуйста, введите значение."
     else
@@ -112,7 +112,7 @@ while true; do
 done
 
 while true; do
-    read -p "Введите API ключ Cloudflare: " CF_API_KEY
+    read -p "Введите Global API ключ Cloudflare: " CF_API_KEY
     if [ -z "$CF_API_KEY" ]; then
         warning "API ключ не может быть пустым. Пожалуйста, введите значение."
     else
@@ -126,7 +126,7 @@ read -p "Введите порт для API (по умолчанию 62051): " A
 API_PORT=${API_PORT:-62051}
 
 # Запрос SSL сертификата
-log "Введите SSL client сертификат (Ctrl+D для завершения ввода):"
+log "Введите SSL client сертификат (После Enter - Ctrl+D для завершения ввода):"
 SSL_CERT=$(cat)
 if [ -z "$SSL_CERT" ]; then
     error "SSL сертификат не может быть пустым."
@@ -179,9 +179,7 @@ else
     debug "Опциональная установка BBR пропущена."
 fi
 
-# ======================== Установка Nginx и Certbot ========================
 log "==================== УСТАНОВКА NGINX ===================="
-log "Шаг 1.4: Установка Nginx 1.26..."
 curl https://nginx.org/keys/nginx_signing.key | gpg --dearmor | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
 gpg --dry-run --quiet --no-keyring --import --import-options import-show /usr/share/keyrings/nginx-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu $(lsb_release -cs) nginx" | tee /etc/apt/sources.list.d/nginx.list
@@ -189,12 +187,9 @@ echo -e "Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 
 apt update 2>&1 | while read -r line; do debug "$line"; done
 apt install -y nginx || error "Ошибка при установке Nginx"
 apt install -y certbot python3-certbot-dns-cloudflare || error "Ошибка при установке Certbot"
-
-log "Шаг 2.1: Генерация dhparam (это может занять некоторое время)..."
 mkdir -p /etc/nginx
 openssl dhparam -out /etc/nginx/dhparam.pem 2048 || error "Ошибка при генерации dhparam"
 
-# ======================== Настройка SSL и Nginx ========================
 log "==================== НАСТРОЙКА SSL И NGINX ===================="
 mkdir -p /etc/letsencrypt
 cat > /etc/letsencrypt/cloudflare.ini << EOF
@@ -452,17 +447,15 @@ echo "y" | ufw enable
 ufw status verbose || error "Ошибка при настройке UFW"
 
 log "Настройка SSH..."
-# Если выбрана настройка SSH ключа, добавляем ключ в authorized_keys
 if $INSTALL_SSH_KEY; then
     mkdir -p /root/.ssh
     chmod 700 /root/.ssh
     cat > /root/.ssh/authorized_keys << EOF
 ${SSH_KEY}
 EOF
-fi
 
-# Настройка базового конфига SSH
-cat > /etc/ssh/sshd_config << EOF
+    # Настройка базового конфига SSH
+    cat > /etc/ssh/sshd_config << EOF
 Port ${SSH_PORT}
 Protocol 2
 PermitRootLogin prohibit-password
@@ -475,12 +468,12 @@ LoginGraceTime 60
 AllowUsers root
 EOF
 
-systemctl restart ssh
-if ! systemctl is-active --quiet ssh; then
-    error "Не удалось запустить SSH"
+    systemctl restart ssh
+    if ! systemctl is-active --quiet ssh; then
+        error "Не удалось запустить SSH"
+    fi
 fi
 
-log "==================== УСТАНОВКА ЗАВЕРШЕНА ===================="
 log "Установка успешно завершена!"
 debug "Все компоненты установлены и настроены"
 read -p "Перезагрузить систему сейчас? (y/n): " reboot_now
