@@ -1,7 +1,7 @@
 #!/bin/bash
-# Вывод баннера автора в консоль
+
 clear
-echo -e "\033[1;31m"  # установка красного цвета для баннера
+echo -e "\033[1;31m"
 cat << "EOF"
  ▄▄▄▄   ██▓   ▄▄▄       ▄████ ▒█████ ▓█████▄ ▄▄▄      ██▀███ ▓█████ ███▄    █ 
 ▓█████▄▓██▒  ▒████▄    ██▒ ▀█▒██▒  ██▒██▀ ██▒████▄   ▓██ ▒ ██▓█   ▀ ██ ▀█   █ 
@@ -14,34 +14,25 @@ cat << "EOF"
  ░         ░  ░    ░  ░     ░    ░ ░    ░         ░  ░  ░       ░  ░        ░ 
       ░                               ░                                       
 EOF
-echo -e "\033[0m"  # сброс цвета
+echo -e "\033[0m"
 echo ""
 
-# ======================== Конфигурация цветов ========================
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# ======================== Функции логирования ========================
 log() { echo -e "${GREEN}[INFO]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 debug() { echo -e "[DEBUG] $1"; }
 
-# ======================== Интерактивный выбор опций ========================
-read -p "Установить BBR? (y/n): " ans_bbr
+# ======================== Параметры ========================
+read -p "Установить BBR и Xanmod Kernel? (y/n): " ans_bbr
 if [[ $ans_bbr =~ ^[Yy] ]]; then
     INSTALL_BBR=true
 else
     INSTALL_BBR=false
-fi
-
-read -p "Установить Xanmod Kernel? (y/n): " ans_xanmod
-if [[ $ans_xanmod =~ ^[Yy] ]]; then
-    INSTALL_XANMOD=true
-else
-    INSTALL_XANMOD=false
 fi
 
 read -p "Настроить SSH ключ? (y/n): " ans_sshkey
@@ -51,12 +42,10 @@ else
     INSTALL_SSH_KEY=false
 fi
 
-# ======================== Проверка root прав ========================
 if [[ $EUID -ne 0 ]]; then
    error "Этот скрипт должен быть запущен с правами root"
 fi
 
-# ======================== Сбор данных от пользователя ========================
 log "==================== НАЧАЛО УСТАНОВКИ ===================="
 log "Этап 0: Сбор необходимых данных..."
 
@@ -81,12 +70,13 @@ while true; do
     fi
 done
 
-# Если выбрана настройка SSH ключа, запрашиваем его у пользователя
 if $INSTALL_SSH_KEY; then
     while true; do
         log "Введите ваш публичный SSH ключ (должен начинаться с 'ssh-rsa' или 'ssh-ed25519'):"
         read SSH_KEY
-        if [[ "$SSH_KEY" =~ ^(ssh-rsa|ssh-ed25519)[[:space:]].*$ ]]; then
+        if [[ -z "$SSH_KEY" ]]; then
+            warning "SSH ключ не может быть пустым."
+        elif [[ "$SSH_KEY" =~ ^(ssh-rsa|ssh-ed25519)[[:space:]].*$ ]]; then
             break
         else
             warning "Некорректный формат SSH ключа."
@@ -94,10 +84,42 @@ if $INSTALL_SSH_KEY; then
     done
 fi
 
-read -p "Введите субдомен (например, us.domain.com): " SUBDOMAIN
-read -p "Введите имя ноды (например, us-node): " NODE_NAME
-read -p "Введите email для Cloudflare: " CF_EMAIL
-read -p "Введите API ключ Cloudflare: " CF_API_KEY
+while true; do
+    read -p "Введите субдомен (например, us.domain.com): " SUBDOMAIN
+    if [ -z "$SUBDOMAIN" ]; then
+        warning "Субдомен не может быть пустым. Пожалуйста, введите значение."
+    else
+        break
+    fi
+done
+
+while true; do
+    read -p "Введите имя ноды (например, us-node): " NODE_NAME
+    if [ -z "$NODE_NAME" ]; then
+        warning "Имя ноды не может быть пустым. Пожалуйста, введите значение."
+    else
+        break
+    fi
+done
+
+while true; do
+    read -p "Введите email для Cloudflare: " CF_EMAIL
+    if [ -z "$CF_EMAIL" ]; then
+        warning "Email не может быть пустым. Пожалуйста, введите значение."
+    else
+        break
+    fi
+done
+
+while true; do
+    read -p "Введите API ключ Cloudflare: " CF_API_KEY
+    if [ -z "$CF_API_KEY" ]; then
+        warning "API ключ не может быть пустым. Пожалуйста, введите значение."
+    else
+        break
+    fi
+done
+
 read -p "Введите порт для сервиса (по умолчанию 62050): " SERVICE_PORT
 SERVICE_PORT=${SERVICE_PORT:-62050}
 read -p "Введите порт для API (по умолчанию 62051): " API_PORT
@@ -106,6 +128,9 @@ API_PORT=${API_PORT:-62051}
 # Запрос SSL сертификата
 log "Введите SSL client сертификат (Ctrl+D для завершения ввода):"
 SSL_CERT=$(cat)
+if [ -z "$SSL_CERT" ]; then
+    error "SSL сертификат не может быть пустым."
+fi
 
 # Извлечение тела сертификата (без BEGIN/END)
 CERT_BODY=$(echo "$SSL_CERT" | grep -v "BEGIN CERTIFICATE" | grep -v "END CERTIFICATE" | tr -d '\n')
@@ -152,18 +177,6 @@ EOF
     rm bbrv3.sh
 else
     debug "Опциональная установка BBR пропущена."
-fi
-
-# ======================== Опциональная установка Xanmod Kernel ========================
-if $INSTALL_XANMOD; then
-    log "==================== УСТАНОВКА XANMOD KERNEL ===================="
-    log "Шаг: Добавление репозитория и установка Xanmod Kernel..."
-    curl -s https://dl.xanmod.org/gpg.key | gpg --dearmor | tee /usr/share/keyrings/xanmod.gpg > /dev/null || error "Ошибка при добавлении ключа Xanmod"
-    echo "deb [signed-by=/usr/share/keyrings/xanmod.gpg] http://dl.xanmod.org/debian all main" | tee /etc/apt/sources.list.d/xanmod-kernel.list
-    apt update 2>&1 | while read -r line; do debug "$line"; done
-    apt install -y linux-xanmod || error "Ошибка при установке Xanmod Kernel"
-else
-    debug "Опциональная установка Xanmod Kernel пропущена."
 fi
 
 # ======================== Установка Nginx и Certbot ========================
@@ -434,8 +447,7 @@ ufw default allow outgoing
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow ${SSH_PORT}/tcp
-ufw allow from ${MASTER_IP} to any port ${SERVICE_PORT} proto tcp
-ufw allow from ${MASTER_IP} to any port ${API_PORT} proto tcp
+ufw allow from ${MASTER_IP}
 echo "y" | ufw enable
 ufw status verbose || error "Ошибка при настройке UFW"
 
