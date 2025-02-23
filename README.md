@@ -2,8 +2,8 @@
 
 -----
 
-### Node using VLESS-TCP-REALITY (Steal from yourself) ONLY, if you want use XTLS, etc. make sure to make some edits
-This Bash script automates the installation and configuration of a Marzban Node along with several essential system components. It performs system updates, installs necessary packages, optionally installs BBR, Xanmod for improved network performance, configures Nginx with SSL via Certbot and Cloudflare, and sets up UFW and SSH.
+### Нода использует ТОЛЬКО VLESS-TCP-REALITY (Steal from yourself), если вам нужен XTLS, etc. придется внести изменения в код скрипта
+Этот Bash-скрипт автоматизирует установку и настройку Marzban Node вместе с несколькими важными системными компонентами. Он выполняет обновление системы, устанавливает необходимые пакеты, при необходимости устанавливает BBR, Xanmod для повышения производительности сети, настраивает Nginx с SSL через Certbot и Cloudflare, а также настраивает UFW и SSH.
 
 > [!IMPORTANT]
 >  Tested only on Ubuntu 24.04
@@ -11,11 +11,9 @@ This Bash script automates the installation and configuration of a Marzban Node 
 
 -----
 
-### Setting up cloudflare
-1. Upgrade the system and reboot the server.
-2. Configure Cloudflare:
-   - Bind your domain to Cloudflare.
-   - Add the following DNS records:
+### Настройка Cloudflare
+   - Привяжите ваш домен к Cloudflare.
+   - Добавьте следующие DNS-записи:
 
 | Type  | Name             | Content          | Proxy status  |
 | ----- | ---------------- | ---------------- | ------------- |
@@ -23,16 +21,28 @@ This Bash script automates the installation and configuration of a Marzban Node 
 | A     | domain_name      | master_node_ip   | DNS only      |
 | CNAME | www              | domain_name      | DNS only      |
    
-3. SSL/TLS settings in Cloudflare:
-   - Go to SSL/TLS > Overview and select Full for the Configure option.
-   - Set the Minimum TLS Version to TLS 1.3.
-   - Enable TLS 1.3 (true) under Edge Certificates.
+Настройки SSL/TLS в Cloudflare:
+   - Перейдите в раздел SSL/TLS > Overview и выберите опцию Full для настройки.
+   - Установите минимальную версию TLS на TLS 1.3.
+   - В разделе Edge Certificates включите TLS 1.3 (true).
 
 -----
 
-### Installation:
+### Установка:
 
-To begin configuring the server, simply run the following command in a terminal:
+Чтобы начать настройку сервера, просто выполните следующую команду в терминале:
 ```sh
 bash <(curl -Ls https://github.com/blagodaren/reverse-marz-node/raw/main/marz-node-script.sh)
 ```
+В панели Marzban мастер-сервера требуется внести изменения в конфигурацию ядра xray, в inbound с TCP-REALITY нужно добавить serverName ноды по следующему примеру:
+
+```
+"serverNames": [
+   "domain.com",
+   "node.domain.com"
+]
+```
+
+Также не забудьте добавить новый хост ноды:
+
+![image](https://github.com/user-attachments/assets/d3c8c238-2df1-4cee-ad58-d5564bdc2693)
