@@ -1,32 +1,15 @@
 # NODE SCRIPT FOR REVERSE_PROXY ([by cortez24rus](https://github.com/cortez24rus/marz-reverse-proxy))
 
+Все благодарности и звезды направлять автору оригинального скрипта - https://github.com/blagodaren/reverse-marz-node
+
 -----
 
 ### Нода использует ТОЛЬКО VLESS-TCP-REALITY (Steal from yourself), если вам нужен XTLS, etc. придется внести изменения в код скрипта
-Этот Bash-скрипт автоматизирует установку и настройку Marzban Node вместе с несколькими важными системными компонентами. Он выполняет обновление системы, устанавливает необходимые пакеты, при необходимости устанавливает BBR, Xanmod для повышения производительности сети, настраивает Nginx с SSL через Certbot и Cloudflare, а также настраивает UFW и SSH.
+Этот Bash-скрипт автоматизирует установку и настройку Marzban Node вместе с несколькими важными системными компонентами. Он выполняет обновление системы, устанавливает необходимые пакеты, при необходимости устанавливает BBR, Xanmod для повышения производительности сети, настраивает Caddy, а также настраивает UFW и SSH.
 
 > [!IMPORTANT]
 >  Tested only on Ubuntu 24.04
 
-
------
-
-### Настройка Cloudflare
-   - Привяжите ваш домен к Cloudflare.
-   - Добавьте следующие DNS-записи:
-
-| Type  | Name             | Content          | Proxy status  |
-| ----- | ---------------- | ---------------- | ------------- |
-| A     | subdomain_name   | node_ip          | DNS only      |
-| A     | domain_name      | master_node_ip   | DNS only      |
-| CNAME | www              | domain_name      | DNS only      |
-   
-Настройки SSL/TLS в Cloudflare:
-   - Перейдите в раздел SSL/TLS > Overview и выберите опцию Full для настройки.
-   - Установите минимальную версию TLS на TLS 1.3.
-   - В разделе Edge Certificates включите TLS 1.3 (true).
-
------
 
 ### Установка:
 
