@@ -203,7 +203,7 @@ log "==================== НАСТРОЙКА CADDY ===================="
 log "Настройка Caddyfile..."
 
 # Создание Caddyfile на основе шаблона
-cat > /etc/caddy/Caddyfile << EOF
+cat > /etc/caddy/Caddyfile << CADDY_EOF
 {
   https_port 4123
   default_bind 127.0.0.1
@@ -237,11 +237,11 @@ http://${SUBDOMAIN} {
   bind 0.0.0.0
   respond 204
 }
-EOF
+CADDY_EOF
 
 # Создание директории для веб-контента
 mkdir -p /var/www/${SUBDOMAIN}
-cat > /var/www/${SUBDOMAIN}/index.html << 'EOF'
+cat > /var/www/${SUBDOMAIN}/index.html << 'HTML_EOF'
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -283,7 +283,7 @@ cat > /var/www/${SUBDOMAIN}/index.html << 'EOF'
     </div>
 </body>
 </html>
-EOF
+HTML_EOF
 
 chown -R caddy:caddy /var/www/${SUBDOMAIN}
 chmod -R 755 /var/www/${SUBDOMAIN}
@@ -472,12 +472,12 @@ log "Настройка SSH..."
 if $INSTALL_SSH_KEY; then
     mkdir -p /root/.ssh
     chmod 700 /root/.ssh
-    cat > /root/.ssh/authorized_keys << EOF
+    cat > /root/.ssh/authorized_keys << KEYS_EOF
 ${SSH_KEY}
-EOF
+KEYS_EOF
 
     # Настройка базового конфига SSH
-    cat > /etc/ssh/sshd_config << EOF
+    cat > /etc/ssh/sshd_config << SSH_EOF
 Port ${SSH_PORT}
 Protocol 2
 PermitRootLogin prohibit-password
@@ -488,7 +488,7 @@ X11Forwarding no
 MaxAuthTries 3
 LoginGraceTime 60
 AllowUsers root
-EOF
+SSH_EOF
 
     systemctl restart ssh
     if ! systemctl is-active --quiet ssh; then
