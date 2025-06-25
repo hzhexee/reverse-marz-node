@@ -279,19 +279,93 @@ EOF
 
 rm -f marzban-node.sh
 
+log "Ожидание завершения установки Marzban Node..."
+# Даем время установке завершиться
+sleep 10
+
+# Проверяем, что Docker сервис запущен
+log "Проверка состояния Docker..."
+if ! systemctl is-active --quiet docker; then
+    log "Запуск Docker сервиса..."
+    systemctl start docker
+    sleep 5
+fi
+
 mkdir -p /var/lib/marzban/log
 touch /var/lib/marzban/log/access.log
 chmod 755 /var/lib/marzban/log
 chmod 644 /var/lib/marzban/log/access.log
 
-DOCKER_COMPOSE_FILE="/opt/${NODE_NAME}/docker-compose.yml"
-if [[ -f "${DOCKER_COMPOSE_FILE}" ]]; then
-    sed -i '/volumes:/a\      - /var/lib/marzban/log:/var/lib/marzban/log' ${DOCKER_COMPOSE_FILE}
-    cd /opt/${NODE_NAME}
-    docker compose down
-    docker compose up -d
+# Проверка различных возможных расположений docker-compose.yml
+DOCKER_COMPOSE_FILE=""
+POSSIBLE_LOCATIONS=(
+    "/opt/${NODE_NAME}/docker-compose.yml"
+    "/opt/marzban-node/docker-compose.yml"
+    "/opt/marzban-node-${NODE_NAME}/docker-compose.yml"
+    "/root/marzban-node/docker-compose.yml"
+    "/root/${NODE_NAME}/docker-compose.yml"
+)
+
+debug "Поиск docker-compose.yml в следующих местах:"
+for location in "${POSSIBLE_LOCATIONS[@]}"; do
+    debug "Проверка: $location"
+    if [[ -f "$location" ]]; then
+        DOCKER_COMPOSE_FILE="$location"
+        debug "Найден docker-compose.yml: $location"
+        break
+    fi
+done
+
+# Если не найден в предопределенных местах, попробуем найти через find
+if [[ -z "$DOCKER_COMPOSE_FILE" ]]; then
+    debug "Поиск docker-compose.yml через find..."
+    FOUND_FILES=$(find /opt /root -name "docker-compose.yml" -type f 2>/dev/null | head -5)
+    if [[ -n "$FOUND_FILES" ]]; then
+        debug "Найденные docker-compose.yml файлы:"
+        echo "$FOUND_FILES" | while read -r file; do
+            debug "  - $file"
+        done
+        DOCKER_COMPOSE_FILE=$(echo "$FOUND_FILES" | head -1)
+        debug "Используется первый найденный: $DOCKER_COMPOSE_FILE"
+    fi
+fi
+
+if [[ -f "$DOCKER_COMPOSE_FILE" ]]; then
+    debug "Настройка монтирования логов в $DOCKER_COMPOSE_FILE"
+    COMPOSE_DIR=$(dirname "$DOCKER_COMPOSE_FILE")
+    
+    # Проверим, есть ли уже монтирование логов
+    if ! grep -q "/var/lib/marzban/log" "$DOCKER_COMPOSE_FILE"; then
+        sed -i '/volumes:/a\      - /var/lib/marzban/log:/var/lib/marzban/log' "$DOCKER_COMPOSE_FILE"
+        debug "Добавлено монтирование логов"
+    else
+        debug "Монтирование логов уже настроено"
+    fi
+    
+    cd "$COMPOSE_DIR"
+    debug "Перезапуск Docker Compose в директории: $COMPOSE_DIR"
+    
+    # Более надежная остановка контейнеров
+    docker compose down 2>/dev/null || true
+    sleep 3
+    
+    # Запуск с повторной попыткой в случае неудачи
+    if ! docker compose up -d; then
+        warning "Первая попытка запуска не удалась, повторная попытка через 5 секунд..."
+        sleep 5
+        docker compose up -d
+    fi
+    
+    # Проверка статуса контейнеров
+    sleep 5
+    log "Статус контейнеров Marzban Node:"
+    docker compose ps | while read -r line; do debug "  $line"; done
 else
-    warning "Файл docker-compose.yml не найден, пропуск настройки монтирования логов."
+    warning "Файл docker-compose.yml не найден ни в одном из ожидаемых мест, пропуск настройки монтирования логов."
+    debug "Список содержимого /opt:"
+    ls -la /opt/ 2>/dev/null | while read -r line; do debug "  $line"; done
+    debug "Список содержимого /root:"
+    ls -la /root/ 2>/dev/null | while read -r line; do debug "  $line"; done
 fi
 
 # ======================== Финальные проверки и настройки ========================
