@@ -27,6 +27,35 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 debug() { echo -e "[DEBUG] $1"; }
 
+# Функция ожидания освобождения блокировки APT
+wait_for_apt_lock() {
+    local max_wait=300  # 5 минут
+    local wait_time=0
+    
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+        if [ $wait_time -ge $max_wait ]; then
+            error "Превышено время ожидания освобождения блокировки APT"
+        fi
+        
+        warning "APT заблокирован другим процессом, ожидание... ($wait_time/$max_wait сек)"
+        sleep 10
+        wait_time=$((wait_time + 10))
+    done
+    
+    # Дополнительная проверка других блокировок
+    while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+        if [ $wait_time -ge $max_wait ]; then
+            error "Превышено время ожидания освобождения блокировки APT"
+        fi
+        
+        warning "Обнаружены дополнительные блокировки APT, ожидание... ($wait_time/$max_wait сек)"
+        sleep 10
+        wait_time=$((wait_time + 10))
+    done
+    
+    log "Блокировки APT освобождены"
+}
+
 # ======================== Параметры ========================
 read -p "Установить BBR и Xanmod Kernel? (y/n): " ans_bbr
 if [[ $ans_bbr =~ ^[Yy] ]]; then
@@ -131,6 +160,9 @@ debug "API port: ${API_PORT}"
 # ======================== Установка системных компонентов ========================
 log "==================== СИСТЕМНЫЕ КОМПОНЕНТЫ ===================="
 log "Этап 1: Установка системных компонентов..."
+
+log "Шаг 1.0: Проверка блокировок APT..."
+wait_for_apt_lock
 
 log "Шаг 1.1: Обновление системы..."
 apt update 2>&1 | while read -r line; do debug "$line"; done
@@ -256,6 +288,41 @@ EOF
 chown -R caddy:caddy /var/www/${SUBDOMAIN}
 chmod -R 755 /var/www/${SUBDOMAIN}
 
+# ======================== Предварительная установка Docker ========================
+log "==================== УСТАНОВКА DOCKER ===================="
+log "Этап 2: Предварительная установка Docker..."
+
+# Проверка, установлен ли уже Docker
+if ! command -v docker &> /dev/null; then
+    log "Docker не найден, выполняется установка..."
+    wait_for_apt_lock
+    
+    # Установка Docker
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    chmod +x get-docker.sh
+    ./get-docker.sh
+    rm -f get-docker.sh
+    
+    # Запуск и включение Docker
+    systemctl enable docker
+    systemctl start docker
+    
+    # Проверка установки
+    if ! systemctl is-active --quiet docker; then
+        error "Не удалось запустить Docker сервис"
+    fi
+    
+    log "Docker успешно установлен и запущен"
+else
+    log "Docker уже установлен"
+    
+    # Убедимся, что Docker запущен
+    if ! systemctl is-active --quiet docker; then
+        log "Запуск Docker сервиса..."
+        systemctl start docker
+    fi
+fi
+
 # ======================== Установка Marzban Node ========================
 log "==================== УСТАНОВКА MARZBAN NODE ===================="
 log "Этап 3: Установка Marzban Node..."
@@ -281,15 +348,26 @@ rm -f marzban-node.sh
 
 log "Ожидание завершения установки Marzban Node..."
 # Даем время установке завершиться
-sleep 10
+sleep 15
 
-# Проверяем, что Docker сервис запущен
-log "Проверка состояния Docker..."
+# Убедимся, что Docker сервис запущен и работает
+log "Финальная проверка Docker сервиса..."
 if ! systemctl is-active --quiet docker; then
-    log "Запуск Docker сервиса..."
+    warning "Docker сервис не активен, попытка запуска..."
     systemctl start docker
     sleep 5
+    
+    if ! systemctl is-active --quiet docker; then
+        error "Критическая ошибка: не удалось запустить Docker сервис"
+    fi
 fi
+
+# Проверка, что команда docker работает
+if ! docker --version >/dev/null 2>&1; then
+    error "Docker установлен, но команда docker не работает"
+fi
+
+log "Docker сервис работает корректно"
 
 mkdir -p /var/lib/marzban/log
 touch /var/lib/marzban/log/access.log
