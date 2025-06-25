@@ -1,0 +1,33 @@
+{
+  https_port 4123
+  default_bind 127.0.0.1
+  servers {
+    listener_wrappers {
+      proxy_protocol {
+        allow 127.0.0.1/32
+      }
+      tls
+    }
+  }
+  auto_https disable_redirects
+}
+https://{{ domain }} {
+{% if setup_variant == "marzban" %}
+  reverse_proxy * unix//run/marzban/marzban.socket
+{% else %}
+  root * /srv
+  file_server
+{% endif %}
+}
+http://{{ domain }} {
+  bind 0.0.0.0
+  redir https://{host}{uri} permanent
+}
+:4123 {
+        tls internal
+        respond 204
+}
+:80 {
+        bind 0.0.0.0
+        respond 204
+}

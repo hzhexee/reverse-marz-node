@@ -102,23 +102,7 @@ while true; do
     fi
 done
 
-while true; do
-    read -p "Введите email для Cloudflare: " CF_EMAIL
-    if [ -z "$CF_EMAIL" ]; then
-        warning "Email не может быть пустым. Пожалуйста, введите значение."
-    else
-        break
-    fi
-done
-
-while true; do
-    read -p "Введите Global API ключ Cloudflare: " CF_API_KEY
-    if [ -z "$CF_API_KEY" ]; then
-        warning "API ключ не может быть пустым. Пожалуйста, введите значение."
-    else
-        break
-    fi
-done
+# Cloudflare настройки убраны - используем Caddy с автоматическими сертификатами
 
 read -p "Введите порт для сервиса (по умолчанию 62050): " SERVICE_PORT
 SERVICE_PORT=${SERVICE_PORT:-62050}
@@ -141,13 +125,8 @@ fi
 debug "Установлены следующие значения:"
 debug "Субдомен: ${SUBDOMAIN}"
 debug "Название ноды: ${NODE_NAME}"
-debug "Email: ${CF_EMAIL}"
 debug "Service port: ${SERVICE_PORT}"
 debug "API port: ${API_PORT}"
-
-# Извлечение основного домена
-MAIN_DOMAIN=$(echo ${SUBDOMAIN} | awk -F. '{print $(NF-1)"."$NF}')
-debug "Основной домен: ${MAIN_DOMAIN}"
 
 # ======================== Установка системных компонентов ========================
 log "==================== СИСТЕМНЫЕ КОМПОНЕНТЫ ===================="
@@ -179,166 +158,56 @@ else
     debug "Опциональная установка BBR пропущена."
 fi
 
-log "==================== УСТАНОВКА NGINX ===================="
-curl https://nginx.org/keys/nginx_signing.key | gpg --dearmor | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
-gpg --dry-run --quiet --no-keyring --import --import-options import-show /usr/share/keyrings/nginx-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/ubuntu $(lsb_release -cs) nginx" | tee /etc/apt/sources.list.d/nginx.list
-echo -e "Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n" | tee /etc/apt/preferences.d/99nginx
+log "==================== УСТАНОВКА CADDY ===================="
+log "Шаг 1.4: Установка Caddy..."
+
+# Добавление официального репозитория Caddy
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
 apt update 2>&1 | while read -r line; do debug "$line"; done
-apt install -y nginx || error "Ошибка при установке Nginx"
-apt install -y certbot python3-certbot-dns-cloudflare || error "Ошибка при установке Certbot"
-mkdir -p /etc/nginx
-openssl dhparam -out /etc/nginx/dhparam.pem 2048 || error "Ошибка при генерации dhparam"
+apt install -y caddy || error "Ошибка при установке Caddy"
 
-log "==================== НАСТРОЙКА SSL И NGINX ===================="
-mkdir -p /etc/letsencrypt
-cat > /etc/letsencrypt/cloudflare.ini << EOF
-dns_cloudflare_email = ${CF_EMAIL}
-dns_cloudflare_api_key = ${CF_API_KEY}
-EOF
-chmod 600 /etc/letsencrypt/cloudflare.ini
+log "==================== НАСТРОЙКА CADDY ===================="
+log "Настройка Caddyfile..."
 
-log "Получение SSL сертификатов..."
-certbot certonly \
-    --dns-cloudflare \
-    --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
-    -d ${MAIN_DOMAIN} \
-    -d *.${MAIN_DOMAIN} \
-    --agree-tos \
-    -n \
-    --email ${CF_EMAIL} || error "Ошибка при получении SSL сертификатов"
-
-echo "0 4 * * 2 [ \$((\$(date +\%s) / 604800 \% 2)) -eq 0 ] && root certbot renew --quiet --deploy-hook 'systemctl reload nginx' --random-sleep-on-renew" > /etc/cron.d/certbot-renew
-chmod 644 /etc/cron.d/certbot-renew
-
-log "Настройка конфигурации Nginx..."
-mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
-
-cat > /etc/nginx/nginx.conf << 'EOF'
-user                                   www-data;
-pid                                    /var/run/nginx.pid;
-worker_processes                       auto;
-worker_rlimit_nofile                   65535;
-error_log                              /var/log/nginx/error.log;
-include                                /etc/nginx/modules-enabled/*.conf;
-events {
-    multi_accept                         on;
-    worker_connections                   1024;
-}
-http {
-    map $request_uri $cleaned_request_uri {
-        default $request_uri;
-        "~^(.*?)(\?x_padding=[^ ]*)$" $1;
+# Создание Caddyfile на основе шаблона
+cat > /etc/caddy/Caddyfile << EOF
+{
+  https_port 4123
+  default_bind 127.0.0.1
+  servers {
+    listener_wrappers {
+      proxy_protocol {
+        allow 127.0.0.1/32
+      }
+      tls
     }
-    log_format json_analytics escape=json '{'
-        '$time_local, '
-        '$http_x_forwarded_for, '
-        '$proxy_protocol_addr, '
-        '$request_method '
-        '$status, '
-        '$http_user_agent, '
-        '$cleaned_request_uri, '
-        '$http_referer, '
-        '}';
-    set_real_ip_from                     127.0.0.1;
-    real_ip_header                       X-Forwarded-For;
-    real_ip_recursive                    on;
-    access_log                           /var/log/nginx/access.log json_analytics;
-    sendfile                             on;
-    tcp_nopush                           on;
-    tcp_nodelay                          on;
-    server_tokens                        off;
-    log_not_found                        off;
-    types_hash_max_size                  2048;
-    types_hash_bucket_size               64;
-    client_max_body_size                 16M;
-    keepalive_timeout                    75s;
-    keepalive_requests                   1000;
-    reset_timedout_connection            on;
-    include                              /etc/nginx/mime.types;
-    default_type                         application/octet-stream;
-    ssl_session_timeout                  1d;
-    ssl_session_cache                    shared:SSL:1m;
-    ssl_session_tickets                  off;
-    ssl_prefer_server_ciphers            on;
-    ssl_protocols                        TLSv1.2 TLSv1.3;
-    ssl_ciphers                          TLS13_AES_128_GCM_SHA256:TLS13_AES_256_GCM_SHA384:TLS13_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305;
-    ssl_stapling                         on;
-    ssl_stapling_verify                  on;
-    resolver                             127.0.0.1 valid=60s;
-    resolver_timeout                     2s;
-    gzip                                 on;
-    add_header X-XSS-Protection          "0" always;
-    add_header X-Content-Type-Options    "nosniff" always;
-    add_header Referrer-Policy           "no-referrer-when-downgrade" always;
-    add_header Permissions-Policy        "interest-cohort=()" always;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-    add_header X-Frame-Options           "SAMEORIGIN";
-    proxy_hide_header                    X-Powered-By;
-    include                              /etc/nginx/conf.d/*.conf;
+  }
+  auto_https disable_redirects
 }
-stream {
-    include /etc/nginx/stream-enabled/stream.conf;
+
+https://${SUBDOMAIN} {
+  root * /var/www/${SUBDOMAIN}
+  file_server
+}
+
+http://${SUBDOMAIN} {
+  bind 0.0.0.0
+  redir https://{host}{uri} permanent
+}
+
+:4123 {
+  tls internal
+  respond 204
+}
+
+:80 {
+  bind 0.0.0.0
+  respond 204
 }
 EOF
 
-mkdir -p /etc/nginx/stream-enabled
-rm -f /etc/nginx/conf.d/default.conf
-
-cat > /etc/nginx/stream-enabled/stream.conf << EOF
-map \$ssl_preread_server_name \$backend {
-    default                              block;
-    ${SUBDOMAIN}                         web;
-}
-upstream block {
-    server 127.0.0.1:36076;
-}
-upstream web {
-    server 127.0.0.1:7443;
-}
-upstream xtls {
-    server 127.0.0.1:8443;
-}
-server {
-    listen 443 reuseport;
-    ssl_preread on;
-    proxy_protocol on;
-    proxy_pass \$backend;
-}
-EOF
-
-cat > /etc/nginx/conf.d/local.conf << EOF
-server {
-    listen 80;
-    server_name ${SUBDOMAIN};
-    location / {
-        return 301 https://${SUBDOMAIN}\$request_uri;
-    }
-}
-server {
-    listen 9090 default_server;
-    server_name ${SUBDOMAIN};
-    location / {
-        return 301 https://${SUBDOMAIN}\$request_uri;
-    }
-}
-server {
-    listen 36076 ssl proxy_protocol;
-    ssl_reject_handshake on;
-}
-server {
-    listen 36077 ssl proxy_protocol;
-    http2 on;
-    server_name ${SUBDOMAIN};
-    ssl_certificate /etc/letsencrypt/live/${MAIN_DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${MAIN_DOMAIN}/privkey.pem;
-    ssl_trusted_certificate /etc/letsencrypt/live/${MAIN_DOMAIN}/chain.pem;
-    ssl_dhparam /etc/nginx/dhparam.pem;
-    index index.html;
-    root /var/www/${SUBDOMAIN}/;
-}
-EOF
-
+# Создание директории для веб-контента
 mkdir -p /var/www/${SUBDOMAIN}
 cat > /var/www/${SUBDOMAIN}/index.html << 'EOF'
 <!DOCTYPE html>
@@ -384,7 +253,7 @@ cat > /var/www/${SUBDOMAIN}/index.html << 'EOF'
 </html>
 EOF
 
-chown -R www-data:www-data /var/www/${SUBDOMAIN}
+chown -R caddy:caddy /var/www/${SUBDOMAIN}
 chmod -R 755 /var/www/${SUBDOMAIN}
 
 # ======================== Установка Marzban Node ========================
@@ -427,12 +296,13 @@ fi
 
 # ======================== Финальные проверки и настройки ========================
 log "==================== ФИНАЛЬНЫЕ ПРОВЕРКИ ===================="
-nginx -t 2>&1 | while read -r line; do debug "$line"; done || error "Ошибка в конфигурации Nginx"
+log "Проверка конфигурации Caddy..."
+caddy validate --config /etc/caddy/Caddyfile 2>&1 | while read -r line; do debug "$line"; done || error "Ошибка в конфигурации Caddy"
 
-systemctl enable nginx 2>&1 | while read -r line; do debug "$line"; done
-systemctl start nginx 2>&1 | while read -r line; do debug "$line"; done
-if ! systemctl is-active --quiet nginx; then
-    error "Не удалось запустить Nginx"
+systemctl enable caddy 2>&1 | while read -r line; do debug "$line"; done
+systemctl start caddy 2>&1 | while read -r line; do debug "$line"; done
+if ! systemctl is-active --quiet caddy; then
+    error "Не удалось запустить Caddy"
 fi
 
 log "Настройка UFW..."
